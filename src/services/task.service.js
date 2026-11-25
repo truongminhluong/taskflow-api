@@ -1,6 +1,11 @@
 import mongoose from "mongoose";
 import Task from "../models/task.model.js";
 import {
+  getTaskAssetPublicIds,
+  syncTaskAssetReferences,
+  withAssetTransaction,
+} from "./task-asset.service.js";
+import {
   calculateNextDueDate,
   formatLocalDate,
   validateRepeatConfig,
@@ -444,13 +449,33 @@ const createTask = async (data) => {
     taskData.occurrenceIndex = null;
   }
 
+  if (taskData.attachments?.length > 0) {
+    return withAssetTransaction(async (session) => {
+      await syncTaskAssetReferences({
+        ownerId: taskData.userId,
+        nextAttachments: taskData.attachments,
+        session,
+      });
+      const task = new Task(taskData);
+      return task.save({ session });
+    });
+  }
+
   return Task.create(taskData);
 };
 
 // Cập nhật công việc của user
-const updateTask = async (id, userId, data) => {
+const updateTask = async (id, userId, data, session = null) => {
+  if ("attachments" in data && !session) {
+    return withAssetTransaction((transactionSession) =>
+      updateTask(id, userId, data, transactionSession)
+    );
+  }
+
   const filter = { _id: id, userId };
-  const currentTask = await Task.findOne(filter);
+  let currentTaskQuery = Task.findOne(filter);
+  if (session) currentTaskQuery = currentTaskQuery.session(session);
+  const currentTask = await currentTaskQuery;
   if (!currentTask) return null;
 
   if (data.repeat && currentTask.recurrenceId) {
@@ -541,9 +566,19 @@ const updateTask = async (id, userId, data) => {
     }
   }
 
+  if ("attachments" in updateData) {
+    await syncTaskAssetReferences({
+      ownerId: userId,
+      previousAttachments: currentTask.attachments || [],
+      nextAttachments: updateData.attachments,
+      session,
+    });
+  }
+
   return Task.findOneAndUpdate(filter, updateData, {
     returnDocument: "after",
     runValidators: true,
+    ...(session ? { session } : {}),
   });
 };
 
@@ -606,23 +641,46 @@ const createFollowingOccurrence = async (sourceTask, userId) => {
     return;
   }
 
+  const occurrenceData = {
+    userId,
+    title: sourceTask.title,
+    description: sourceTask.description,
+    dueDate: nextDueDate,
+    priority: sourceTask.priority,
+    category: sourceTask.category,
+    reminderMinutesBefore: sourceTask.reminderMinutesBefore,
+    isUrgent: sourceTask.isUrgent,
+    attachments: sourceTask.attachments,
+    repeat,
+    recurrenceId: sourceTask.recurrenceId,
+    occurrenceIndex: occurrenceIndex + 1,
+    isCompleted: false,
+    completedAt: null,
+  };
+
   try {
-    await Task.create({
-      userId,
-      title: sourceTask.title,
-      description: sourceTask.description,
-      dueDate: nextDueDate,
-      priority: sourceTask.priority,
-      category: sourceTask.category,
-      reminderMinutesBefore: sourceTask.reminderMinutesBefore,
-      isUrgent: sourceTask.isUrgent,
-      attachments: sourceTask.attachments,
-      repeat,
-      recurrenceId: sourceTask.recurrenceId,
-      occurrenceIndex: occurrenceIndex + 1,
-      isCompleted: false,
-      completedAt: null,
-    });
+    if (getTaskAssetPublicIds(sourceTask.attachments).length > 0) {
+      await withAssetTransaction(async (session) => {
+        const sourceQuery = Task.findOne({ _id: sourceTask._id, userId });
+        const currentSource = await sourceQuery.session(session);
+        if (!currentSource) return;
+
+        const attachments = currentSource.attachments || [];
+        await syncTaskAssetReferences({
+          ownerId: userId,
+          previousAttachments: attachments.filter(
+            (attachment) => !attachment.publicId
+          ),
+          nextAttachments: attachments,
+          session,
+        });
+
+        const occurrence = new Task({ ...occurrenceData, attachments });
+        await occurrence.save({ session });
+      });
+    } else {
+      await Task.create(occurrenceData);
+    }
   } catch (error) {
     if (error.code === 11000) {
       const existing = await Task.findOne({
@@ -885,7 +943,21 @@ const deleteRecurringSeries = async (id, userId) => {
 
 // Xóa công việc của user
 const deleteTask = async (id, userId) => {
-  return Task.findOneAndDelete({ _id: id, userId });
+  return withAssetTransaction(async (session) => {
+    const query = Task.findOne({ _id: id, userId });
+    const currentTask = await query.session(session);
+    if (!currentTask) return null;
+
+    if (getTaskAssetPublicIds(currentTask.attachments).length > 0) {
+      await syncTaskAssetReferences({
+        ownerId: userId,
+        previousAttachments: currentTask.attachments || [],
+        nextAttachments: [],
+        session,
+      });
+    }
+    return Task.findOneAndDelete({ _id: id, userId }, { session });
+  });
 };
 
 const taskService = {

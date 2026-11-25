@@ -8,6 +8,8 @@ function safeErrorDetails(error) {
     errorCode: error.code,
     causeName: cause?.name,
     causeCode: cause?.code,
+    upstreamErrorName: error.upstreamErrorName,
+    upstreamErrorCode: error.upstreamErrorCode,
     cleanupErrorName: cleanupError?.name,
     cleanupErrorCode: cleanupError?.code,
   };

@@ -101,6 +101,11 @@ const taskSchema = new mongoose.Schema(
             trim: true,
             maxlength: 2048,
           },
+          publicId: {
+            type: String,
+            trim: true,
+            maxlength: 512,
+          },
           mimeType: {
             type: String,
             required: true,

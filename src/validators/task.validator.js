@@ -300,10 +300,15 @@ const validateTaskFields = (req, res, next) => {
       attachment.url.length > 2048 ||
       typeof attachment.mimeType !== "string" ||
       !allowedAttachmentMimeTypes.has(attachment.mimeType) ||
+      ("publicId" in attachment &&
+        (typeof attachment.publicId !== "string" ||
+          !attachment.publicId.trim() ||
+          attachment.publicId.length > 512)) ||
       (attachment.sizeBytes !== undefined &&
         (!Number.isInteger(attachment.sizeBytes) || attachment.sizeBytes < 0)) ||
       Object.keys(attachment).some(
-        (key) => !["name", "url", "mimeType", "sizeBytes"].includes(key),
+        (key) =>
+          !["name", "url", "publicId", "mimeType", "sizeBytes"].includes(key),
       ),
     );
 
@@ -311,6 +316,15 @@ const validateTaskFields = (req, res, next) => {
       return res.status(400).json({
         message:
           "Mỗi tệp cần có name, url, mimeType ảnh hợp lệ và sizeBytes tùy chọn.",
+      });
+    }
+
+    const publicIds = body.attachments
+      .map((attachment) => attachment.publicId)
+      .filter(Boolean);
+    if (new Set(publicIds).size !== publicIds.length) {
+      return res.status(400).json({
+        message: "Không thể đính kèm cùng một ảnh nhiều lần.",
       });
     }
   }

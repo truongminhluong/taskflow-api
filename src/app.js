@@ -1,6 +1,7 @@
 import express from "express";
 import authRoutes from "./routes/auth.routes.js";
 import taskRoutes from "./routes/task.routes.js";
+import uploadRoutes from "./routes/uploads.routes.js";
 import { authMiddleware } from "./middlewares/auth.middleware.js";
 import {
   notFoundHandler,
@@ -26,6 +27,7 @@ app.use("/api/auth", authRoutes);
 
 // Tất cả API task đều yêu cầu JWT hợp lệ.
 app.use("/api/tasks", authMiddleware, taskRoutes);
+app.use("/api/uploads", uploadRoutes);
 
 // Giữ middleware lỗi ở cuối.
 app.use(notFoundHandler);

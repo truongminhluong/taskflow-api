@@ -2,12 +2,14 @@ import "dotenv/config";
 import mongoose from "mongoose";
 import app from "./app.js";
 import connectDB from "./config/db.js";
+import { startTaskAssetCleanup } from "./services/task-asset-cleanup.service.js";
 
 const PORT = process.env.PORT || 3000;
 
 const startServer = async () => {
   try {
     await connectDB();
+    const stopTaskAssetCleanup = startTaskAssetCleanup();
 
     const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Máy chủ đang chạy tại http://localhost:${PORT}`);
@@ -18,6 +20,7 @@ const startServer = async () => {
       console.log(`\nNhận tín hiệu ${signal}. Đang tắt máy chủ...`);
 
       server.close(async () => {
+        stopTaskAssetCleanup();
         await mongoose.disconnect();
         console.log("Đã ngắt kết nối MongoDB.");
         process.exit(0);
