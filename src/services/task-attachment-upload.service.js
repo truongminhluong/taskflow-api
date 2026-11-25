@@ -52,6 +52,13 @@ function uploadError(statusCode, message, cause) {
   error.statusCode = statusCode;
   error.operation = "cloudinary-upload";
   if (cause) {
+    error.cause = cause;
+    error.upstreamErrorMessage =
+      typeof cause.message === "string" ? cause.message : undefined;
+    error.upstreamErrorStatusCode =
+      Number.isInteger(cause.statusCode) ? cause.statusCode :
+      Number.isInteger(cause.http_code) ? cause.http_code :
+      Number.isInteger(cause.status) ? cause.status : undefined;
     error.upstreamErrorName =
       typeof cause.name === "string" &&
       /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(cause.name)

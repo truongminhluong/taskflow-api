@@ -649,6 +649,7 @@ const createFollowingOccurrence = async (sourceTask, userId) => {
     priority: sourceTask.priority,
     category: sourceTask.category,
     reminderMinutesBefore: sourceTask.reminderMinutesBefore,
+    reminderMonthsBefore: sourceTask.reminderMonthsBefore,
     isUrgent: sourceTask.isUrgent,
     attachments: sourceTask.attachments,
     repeat,

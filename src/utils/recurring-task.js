@@ -271,3 +271,41 @@ export function formatLocalDate(date, timeZone) {
     parts.day
   ).padStart(2, "0")}`;
 }
+
+/**
+ * Calculates a reminder instant in the task timezone. Month reminders use
+ * calendar subtraction and clamp to the last valid day of the target month.
+ * This is currently a pure utility: this backend has no notification worker.
+ */
+export function calculateReminderDate(
+  dueDate,
+  { reminderMinutesBefore = null, reminderMonthsBefore = null, timeZone = DEFAULT_TIME_ZONE } = {},
+) {
+  if (!dueDate || (reminderMinutesBefore == null && reminderMonthsBefore == null)) {
+    return null;
+  }
+
+  const local = getLocalParts(new Date(dueDate), timeZone);
+  if (reminderMonthsBefore != null) {
+    const targetMonthIndex = local.month - 1 - reminderMonthsBefore;
+    const targetYear = local.year + Math.floor(targetMonthIndex / 12);
+    const normalizedMonth = ((targetMonthIndex % 12) + 12) % 12;
+    const targetDay = Math.min(
+      local.day,
+      daysInMonth(targetYear, normalizedMonth),
+    );
+    return zonedDateTimeToUtc(
+      {
+        year: targetYear,
+        month: normalizedMonth + 1,
+        day: targetDay,
+        hour: local.hour,
+        minute: local.minute,
+        second: local.second,
+      },
+      timeZone,
+    );
+  }
+
+  return new Date(new Date(dueDate).getTime() - reminderMinutesBefore * 60_000);
+}

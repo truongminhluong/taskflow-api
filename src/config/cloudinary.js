@@ -7,19 +7,37 @@ const requiredEnvironmentVariables = [
 ];
 
 export function isCloudinaryConfigured() {
-  return requiredEnvironmentVariables.every((name) =>
-    Boolean(process.env[name]?.trim())
+  return requiredEnvironmentVariables.every(
+    (name) => getEnvironmentValue(name) !== null
+  );
+}
+
+function getEnvironmentValue(name) {
+  const value = process.env[name];
+  if (typeof value !== "string" || value.length === 0) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed === value ? trimmed : null;
+}
+
+export function cloudinaryConfigurationStatus() {
+  return Object.fromEntries(
+    requiredEnvironmentVariables.map((name) => [
+      name,
+      getEnvironmentValue(name) === null ? "MISSING" : "CONFIGURED",
+    ])
   );
 }
 
 if (isCloudinaryConfigured()) {
   cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
+    cloud_name: getEnvironmentValue("CLOUDINARY_CLOUD_NAME"),
+    api_key: getEnvironmentValue("CLOUDINARY_API_KEY"),
+    api_secret: getEnvironmentValue("CLOUDINARY_API_SECRET"),
     secure: true,
   });
 }
+
+console.info("Cloudinary configuration", cloudinaryConfigurationStatus());
 
 export function uploadImageBuffer(buffer, options) {
   return new Promise((resolve, reject) => {

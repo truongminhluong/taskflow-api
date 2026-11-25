@@ -204,7 +204,8 @@ test("concurrent completion creates exactly one next occurrence", async () => {
     category: "Công việc",
     priority: "medium",
     dueDate: new Date("2026-11-01T17:00:00Z"),
-    reminderMinutesBefore: 15,
+    reminderMinutesBefore: null,
+    reminderMonthsBefore: 1,
     isCompleted: true,
     completedAt: new Date(),
     recurrenceId,
@@ -280,7 +281,8 @@ test("concurrent completion creates exactly one next occurrence", async () => {
     const nextOccurrence = [...occurrences.values()][0];
     assert.equal(nextOccurrence.occurrenceIndex, 2);
     assert.equal(nextOccurrence.recurrenceId, recurrenceId);
-    assert.equal(nextOccurrence.reminderMinutesBefore, 15);
+    assert.equal(nextOccurrence.reminderMinutesBefore, null);
+    assert.equal(nextOccurrence.reminderMonthsBefore, 1);
   } finally {
     Task.findOneAndUpdate = originalFindOneAndUpdate;
     Task.findOne = originalFindOne;

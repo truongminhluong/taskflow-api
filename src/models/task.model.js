@@ -79,9 +79,27 @@ const taskSchema = new mongoose.Schema(
       default: null,
       validate: {
         validator(value) {
-          return value == null || [0, 5, 10, 15, 30, 60, 1440].includes(value);
+          return (
+            value == null ||
+            [0, 5, 10, 15, 30, 60, 120, 1440, 2880, 10080].includes(value)
+          );
         },
         message: "Thời gian nhắc không hợp lệ.",
+      },
+    },
+
+    // Calendar-month reminder is intentionally separate from minutes: a month
+    // cannot be represented as a fixed duration without losing month-end rules.
+    reminderMonthsBefore: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 1,
+      validate: {
+        validator(value) {
+          return value == null || value === 1;
+        },
+        message: "Số tháng nhắc trước không hợp lệ.",
       },
     },
 
@@ -250,6 +268,16 @@ taskSchema.index(
     partialFilterExpression: { recurrenceId: { $type: "objectId" } },
   }
 );
+
+taskSchema.pre("validate", function (next) {
+  if (this.reminderMinutesBefore != null && this.reminderMonthsBefore != null) {
+    this.invalidate(
+      "reminderMonthsBefore",
+      "Chỉ được chọn một kiểu thời gian nhắc.",
+    );
+  }
+  next();
+});
 
 const Task = mongoose.model("Task", taskSchema);
 

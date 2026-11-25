@@ -18,11 +18,14 @@ const allowedFields = [
   "isCompleted",
   "isUrgent",
   "reminderMinutesBefore",
+  "reminderMonthsBefore",
   "attachments",
   "repeat",
 ];
 
-const allowedReminderMinutes = [0, 5, 10, 15, 30, 60, 1440];
+// Keep legacy value 10 readable and writable so existing clients/tasks remain
+// compatible; it is not one of the new UI choices.
+const allowedReminderMinutes = [0, 5, 10, 15, 30, 60, 120, 1440, 2880, 10080];
 const allowedAttachmentMimeTypes = new Set([
   "image/jpeg",
   "image/png",
@@ -278,6 +281,25 @@ const validateTaskFields = (req, res, next) => {
     return res.status(400).json({
       message: "Thời gian nhắc không hợp lệ.",
       allowedValues: allowedReminderMinutes,
+    });
+  }
+
+  if (
+    "reminderMonthsBefore" in body &&
+    body.reminderMonthsBefore !== null &&
+    body.reminderMonthsBefore !== 1
+  ) {
+    return res.status(400).json({
+      message: "reminderMonthsBefore chỉ được là 1 hoặc null.",
+    });
+  }
+
+  if (
+    body.reminderMinutesBefore != null &&
+    body.reminderMonthsBefore != null
+  ) {
+    return res.status(400).json({
+      message: "Chỉ được chọn một kiểu thời gian nhắc.",
     });
   }
 

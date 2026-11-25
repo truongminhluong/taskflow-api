@@ -1,14 +1,34 @@
+function safeErrorMessage(value) {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return value
+    .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/https?:\/\/\S+/gi, "[REDACTED_URL]")
+    .replace(/(api[_-]?key|secret|token|password)=\S+/gi, "$1=[REDACTED]")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
 function safeErrorDetails(error) {
   const cause = error.cause;
+  const nestedCause = cause?.cause;
   const cleanupError = error.cleanupError;
 
   return {
     operation: error.operation || "http-request",
     errorName: error.name,
+    errorMessage: safeErrorMessage(error.message),
     errorCode: error.code,
+    httpStatus: error.statusCode || error.status || error.http_code,
     causeName: cause?.name,
+    causeMessage: safeErrorMessage(cause?.message),
     causeCode: cause?.code,
+    nestedCauseName: nestedCause?.name,
+    nestedCauseMessage: safeErrorMessage(nestedCause?.message),
+    nestedCauseCode: nestedCause?.code,
     upstreamErrorName: error.upstreamErrorName,
+    upstreamErrorMessage: safeErrorMessage(error.upstreamErrorMessage),
+    upstreamErrorStatusCode: error.upstreamErrorStatusCode,
     upstreamErrorCode: error.upstreamErrorCode,
     cleanupErrorName: cleanupError?.name,
     cleanupErrorCode: cleanupError?.code,
@@ -21,7 +41,12 @@ function developmentStack(error) {
     return undefined;
   }
 
-  return [process.env.MAIL_PASSWORD, process.env.JWT_SECRET]
+  return [
+    process.env.MAIL_PASSWORD,
+    process.env.JWT_SECRET,
+    process.env.CLOUDINARY_API_SECRET,
+    process.env.CLOUDINARY_API_KEY,
+  ]
     .filter((secret) => typeof secret === "string" && secret.length > 0)
     .reduce(
       (redactedStack, secret) => redactedStack.split(secret).join("[REDACTED]"),

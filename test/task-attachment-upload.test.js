@@ -6,6 +6,10 @@ import {
   detectImageMimeType,
   uploadTaskAttachment,
 } from "../src/services/task-attachment-upload.service.js";
+import {
+  cloudinaryConfigurationStatus,
+  isCloudinaryConfigured,
+} from "../src/config/cloudinary.js";
 import { validateUpdateTask } from "../src/validators/task.validator.js";
 
 const userId = "507f1f77bcf86cd799439011";
@@ -128,6 +132,63 @@ test("does not call Cloudinary when credentials are not configured", async () =>
     { statusCode: 503 }
   );
   assert.equal(uploadCalls, 0);
+});
+
+test("preserves sanitized Cloudinary error context for the error middleware", async () => {
+  const upstreamError = new Error(
+    "Upload failed: https://api_key:secret@example.test/signature?token=private"
+  );
+  upstreamError.name = "CloudinaryError";
+  upstreamError.http_code = 401;
+  upstreamError.code = "AUTH_FAILED";
+
+  await assert.rejects(
+    uploadTaskAttachment(userId, makeFile(png, "image/png"), {
+      configured: () => true,
+      AssetModel: {
+        create: async () => {},
+      },
+      upload: async () => {
+        throw upstreamError;
+      },
+    }),
+    (error) => {
+      assert.equal(error.statusCode, 502);
+      assert.equal(error.upstreamErrorName, "CloudinaryError");
+      assert.equal(error.upstreamErrorCode, "AUTH_FAILED");
+      assert.equal(error.upstreamErrorStatusCode, 401);
+      assert.equal(error.upstreamErrorMessage, upstreamError.message);
+      assert.equal(error.cause, upstreamError);
+      return true;
+    }
+  );
+});
+
+test("requires non-empty Cloudinary env values without surrounding whitespace", () => {
+  const previous = {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiSecret: process.env.CLOUDINARY_API_SECRET,
+  };
+  process.env.CLOUDINARY_CLOUD_NAME = " cloud ";
+  process.env.CLOUDINARY_API_KEY = "key";
+  process.env.CLOUDINARY_API_SECRET = "secret";
+
+  assert.equal(isCloudinaryConfigured(), false);
+  assert.deepEqual(cloudinaryConfigurationStatus(), {
+    CLOUDINARY_CLOUD_NAME: "MISSING",
+    CLOUDINARY_API_KEY: "CONFIGURED",
+    CLOUDINARY_API_SECRET: "CONFIGURED",
+  });
+
+  for (const [name, value] of Object.entries({
+    CLOUDINARY_CLOUD_NAME: previous.cloudName,
+    CLOUDINARY_API_KEY: previous.apiKey,
+    CLOUDINARY_API_SECRET: previous.apiSecret,
+  })) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
 });
 
 test("records cleanup metadata before uploading and retains it after finalization failure", async () => {
