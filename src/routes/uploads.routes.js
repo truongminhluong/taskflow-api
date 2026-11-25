@@ -6,13 +6,18 @@ import {
   taskAttachmentUploadError,
 } from "../middlewares/task-attachment-upload.middleware.js";
 import taskAttachmentUploadController from "../controllers/task-attachment-upload.controller.js";
+import {
+  measureTaskAttachmentMultipart,
+  startTaskAttachmentPerformance,
+} from "../utils/task-attachment-performance.js";
 
 const router = express.Router();
 
 router.post(
   "/task-attachments",
+  startTaskAttachmentPerformance,
   authMiddleware,
-  taskAttachmentUpload.single("file"),
+  measureTaskAttachmentMultipart(taskAttachmentUpload.single("file")),
   requireTaskAttachmentFile,
   taskAttachmentUploadController
 );

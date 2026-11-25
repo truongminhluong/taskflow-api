@@ -5,6 +5,12 @@ import {
   isCloudinaryConfigured,
   uploadImageBuffer,
 } from "../config/cloudinary.js";
+import {
+  durationMs,
+  logTaskAttachmentPerformance,
+  safeTaskAttachmentErrorType,
+  startTaskAttachmentTimer,
+} from "../utils/task-attachment-performance.js";
 
 const maxFileSize = 5 * 1024 * 1024;
 const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -84,24 +90,48 @@ export async function uploadTaskAttachment(
     upload = uploadImageBuffer,
     makePublicId = randomUUID,
     now = () => new Date(),
+    performanceContext,
   } = {}
 ) {
-  if (!file?.buffer || !Number.isInteger(file.size) || file.size < 1) {
-    throw uploadError(400, "Cần chọn một ảnh hợp lệ.");
-  }
-  if (file.size > maxFileSize || file.buffer.length !== file.size) {
-    throw uploadError(413, "Kích thước ảnh không được vượt quá 5 MB.");
-  }
+  const validationStartedAt = startTaskAttachmentTimer();
+  let detectedMimeType;
+  try {
+    if (!file?.buffer || !Number.isInteger(file.size) || file.size < 1) {
+      throw uploadError(400, "Cần chọn một ảnh hợp lệ.");
+    }
+    if (file.size > maxFileSize || file.buffer.length !== file.size) {
+      throw uploadError(413, "Kích thước ảnh không được vượt quá 5 MB.");
+    }
 
-  const detectedMimeType = detectImageMimeType(file.buffer);
-  if (
-    !detectedMimeType ||
-    !allowedMimeTypes.has(detectedMimeType) ||
-    file.mimetype !== detectedMimeType
-  ) {
-    throw uploadError(400, "Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP hợp lệ.");
+    detectedMimeType = detectImageMimeType(file.buffer);
+    if (
+      !detectedMimeType ||
+      !allowedMimeTypes.has(detectedMimeType) ||
+      file.mimetype !== detectedMimeType
+    ) {
+      throw uploadError(400, "Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP hợp lệ.");
+    }
+  } catch (error) {
+    if (performanceContext) performanceContext.stage = "validation";
+    logTaskAttachmentPerformance(performanceContext, "request_failed", {
+      stage: "validation",
+      error_type: safeTaskAttachmentErrorType(error, "UploadError"),
+      validation_ms: durationMs(validationStartedAt),
+    });
+    throw error;
   }
+  logTaskAttachmentPerformance(performanceContext, "file_validated", {
+    validation_ms: durationMs(validationStartedAt),
+    file_size_bytes: file.size,
+    mime_type: detectedMimeType,
+  });
+
   if (!configured()) {
+    if (performanceContext) performanceContext.stage = "storage_configuration";
+    logTaskAttachmentPerformance(performanceContext, "request_failed", {
+      stage: "storage_configuration",
+      error_type: "ConfigurationError",
+    });
     throw uploadError(503, "Dịch vụ lưu trữ ảnh chưa được cấu hình.");
   }
 
@@ -120,9 +150,21 @@ export async function uploadTaskAttachment(
     referenceCount: 0,
   };
 
+  if (performanceContext) performanceContext.stage = "mongo_pending";
+  const pendingStartedAt = startTaskAttachmentTimer();
   try {
     await AssetModel.create(asset);
+    logTaskAttachmentPerformance(
+      performanceContext,
+      "asset_pending_created",
+      { mongo_pending_ms: durationMs(pendingStartedAt) }
+    );
   } catch (error) {
+    logTaskAttachmentPerformance(performanceContext, "request_failed", {
+      stage: "mongo_pending",
+      error_type: safeTaskAttachmentErrorType(error, "MongoError"),
+      mongo_pending_ms: durationMs(pendingStartedAt),
+    });
     throw uploadError(
       500,
       "Không thể chuẩn bị thông tin ảnh tải lên.",
@@ -131,6 +173,12 @@ export async function uploadTaskAttachment(
   }
 
   let result;
+  if (performanceContext) performanceContext.stage = "cloudinary";
+  const cloudinaryStartedAt = startTaskAttachmentTimer();
+  logTaskAttachmentPerformance(
+    performanceContext,
+    "cloudinary_upload_started"
+  );
   try {
     result = await upload(file.buffer, {
       asset_folder: folder,
@@ -139,7 +187,28 @@ export async function uploadTaskAttachment(
       resource_type: "image",
       allowed_formats: ["jpg", "jpeg", "png", "webp"],
     });
+    logTaskAttachmentPerformance(
+      performanceContext,
+      "cloudinary_upload_finished",
+      {
+        cloudinary_upload_ms: durationMs(cloudinaryStartedAt),
+        success: true,
+      }
+    );
   } catch (error) {
+    logTaskAttachmentPerformance(
+      performanceContext,
+      "cloudinary_upload_finished",
+      {
+        cloudinary_upload_ms: durationMs(cloudinaryStartedAt),
+        success: false,
+        error_type: safeTaskAttachmentErrorType(error, "CloudinaryError"),
+      }
+    );
+    logTaskAttachmentPerformance(performanceContext, "request_failed", {
+      stage: "cloudinary",
+      error_type: safeTaskAttachmentErrorType(error, "CloudinaryError"),
+    });
     throw uploadError(
       502,
       "Không thể tải ảnh lên dịch vụ lưu trữ.",
@@ -152,9 +221,16 @@ export async function uploadTaskAttachment(
     !result.secure_url.startsWith("https://") ||
     result.public_id !== expectedPublicId
   ) {
+    if (performanceContext) performanceContext.stage = "cloudinary_response";
+    logTaskAttachmentPerformance(performanceContext, "request_failed", {
+      stage: "cloudinary_response",
+      error_type: "InvalidCloudinaryResponse",
+    });
     throw uploadError(502, "Dịch vụ lưu trữ trả về kết quả ảnh không hợp lệ.");
   }
 
+  if (performanceContext) performanceContext.stage = "mongo_finalize";
+  const finalizeStartedAt = startTaskAttachmentTimer();
   try {
     const updated = await AssetModel.updateOne(
       {
@@ -174,7 +250,15 @@ export async function uploadTaskAttachment(
     if (updated.matchedCount !== 1) {
       throw new Error("Uploaded asset record is unavailable.");
     }
+    logTaskAttachmentPerformance(performanceContext, "asset_finalized", {
+      mongo_finalize_ms: durationMs(finalizeStartedAt),
+    });
   } catch (error) {
+    logTaskAttachmentPerformance(performanceContext, "request_failed", {
+      stage: "mongo_finalize",
+      error_type: safeTaskAttachmentErrorType(error, "MongoError"),
+      mongo_finalize_ms: durationMs(finalizeStartedAt),
+    });
     throw uploadError(
       500,
       "Không thể lưu thông tin ảnh đã tải lên.",
